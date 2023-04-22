@@ -1,5 +1,4 @@
 import { useContext, useEffect, useRef, useState } from "react";
-import Avatar from "./Avatar";
 import Logo from "./Logo";
 import { UserContext } from "./UserContext.jsx";
 import { uniqBy } from "lodash";
@@ -15,11 +14,12 @@ export default function Chat() {
   const [messages, setMessages] = useState([]);
   const { username, id, setId, setUsername } = useContext(UserContext);
   const divUnderMessages = useRef();
+
   useEffect(() => {
     connectToWs();
   }, [selectedUserId]);
   function connectToWs() {
-    const ws = new WebSocket("ws://localhost:4040");
+    const ws = new WebSocket(process.env.REACT_APP_WEB_SOCKET);
     setWs(ws);
     ws.addEventListener("message", handleMessage);
     ws.addEventListener("close", () => {
@@ -29,6 +29,7 @@ export default function Chat() {
       }, 1000);
     });
   }
+
   function showOnlinePeople(peopleArray) {
     const people = {};
     peopleArray.forEach(({ userId, username }) => {
@@ -36,6 +37,7 @@ export default function Chat() {
     });
     setOnlinePeople(people);
   }
+
   function handleMessage(ev) {
     const messageData = JSON.parse(ev.data);
     console.log({ ev, messageData });
@@ -47,6 +49,7 @@ export default function Chat() {
       }
     }
   }
+
   function logout() {
     axios.post("/logout").then(() => {
       setWs(null);
@@ -54,6 +57,7 @@ export default function Chat() {
       setUsername(null);
     });
   }
+
   function sendMessage(ev, file = null) {
     if (ev) ev.preventDefault();
     ws.send(
@@ -80,6 +84,7 @@ export default function Chat() {
       ]);
     }
   }
+
   function sendFile(ev) {
     const reader = new FileReader();
     reader.readAsDataURL(ev.target.files[0]);
