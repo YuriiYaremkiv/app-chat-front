@@ -1,53 +1,131 @@
+import React from "react";
 import { useContext, useEffect, useRef, useState } from "react";
 import Logo from "./Logo";
-import { UserContext } from "./UserContext.jsx";
+import { UserContext } from "./UserContext";
 import { uniqBy } from "lodash";
 import axios from "axios";
 import Contact from "./Contact";
+import UserServices from "./service/UserServices";
+import { IMessage } from "./service/UserServices";
+
+interface IOfflineUsersType {
+  _id: string;
+  username: string;
+}
+
+interface IPeople {
+  userId: string;
+  username: string;
+}
 
 export default function Chat() {
-  const [ws, setWs] = useState(null);
+  const [ws, setWs] = useState<WebSocket | null>(null);
   const [onlinePeople, setOnlinePeople] = useState({});
-  const [offlinePeople, setOfflinePeople] = useState({});
-  const [selectedUserId, setSelectedUserId] = useState(null);
-  const [newMessageText, setNewMessageText] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [offlinePeople, setOfflinePeople] = useState<Record<string, any>>({});
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [newMessageText, setNewMessageText] = useState<string>("");
+  const [messages, setMessages] = useState<IMessage[] | []>([]);
   const { username, id, setId, setUsername } = useContext(UserContext);
-  const divUnderMessages = useRef();
+  const divUnderMessages = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     connectToWs();
+    return cleanup;
   }, [selectedUserId]);
+
+  useEffect(() => {
+    const div = divUnderMessages.current;
+    if (div) {
+      // div.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    const fetchPeople = async () => {
+      const { data } = await UserServices.getPeople();
+      const offlineUsersArray = data
+        .filter((user) => user._id !== id)
+        .filter((user) => !Object.keys(onlinePeople).includes(user._id));
+
+      const offlineUsers: { [key: string]: IOfflineUsersType } = {};
+      offlineUsersArray.forEach((user) => {
+        offlineUsers[user._id] = user;
+      });
+      setOfflinePeople({ ...offlineUsers });
+    };
+
+    fetchPeople();
+
+    // axios.get("/people").then((res) => {
+    //   const offlinePeopleArr = res.data
+    //     .filter((p) => p._id !== id)
+    //     .filter((p) => !Object.keys(onlinePeople).includes(p._id));
+    //   const offlinePeople = {};
+    //   offlinePeopleArr.forEach((p) => {
+    //     offlinePeople[p._id] = p;
+    //   });
+    //   setOfflinePeople(offlinePeople);
+    // });
+  }, [onlinePeople]);
+
+  useEffect(() => {
+    const fetchUserMessages = async () => {
+      if (selectedUserId) {
+        try {
+          const { data } = await UserServices.getMessages(selectedUserId);
+          setMessages(data);
+        } catch (err) {
+          console.log(err);
+        }
+      }
+    };
+
+    fetchUserMessages();
+  }, [selectedUserId]);
+
   function connectToWs() {
-    const ws = new WebSocket(process.env.REACT_APP_WEB_SOCKET);
-    setWs(ws);
-    ws.addEventListener("message", handleMessage);
-    ws.addEventListener("close", () => {
-      setTimeout(() => {
-        console.log("Disconnected. Trying to reconnect.");
-        connectToWs();
-      }, 1000);
-    });
+    try {
+      const newWs = new WebSocket(process.env.REACT_APP_WEB_SOCKET as string);
+      newWs.addEventListener("message", handleMessage);
+      newWs.addEventListener("close", handleDisconnect);
+      setWs(newWs);
+    } catch (err: unknown) {
+      console.error("Error when establishing a WebSocket connection:", err);
+    }
   }
 
-  function showOnlinePeople(peopleArray) {
-    const people = {};
+  function cleanup() {
+    if (ws) {
+      ws.removeEventListener("message", handleMessage);
+      ws.removeEventListener("close", handleDisconnect);
+      ws.close();
+    }
+  }
+
+  function handleDisconnect() {
+    console.log(
+      "The connection is broken. Attempting to reconnect after 1 second."
+    );
+    setTimeout(() => connectToWs(), 1000);
+  }
+
+  function handleMessage(e: MessageEvent) {
+    const messages = JSON.parse(e.data);
+
+    if ("online" in messages) showOnlinePeople(messages.online);
+
+    if ("text" in messages && messages.sender === selectedUserId) {
+      setMessages((prev) => [...prev, { ...messages }]);
+    }
+  }
+
+  function showOnlinePeople(peopleArray: IPeople[]): void {
+    const people: Record<string, string> = {};
+
     peopleArray.forEach(({ userId, username }) => {
       people[userId] = username;
     });
     setOnlinePeople(people);
-  }
-
-  function handleMessage(ev) {
-    const messageData = JSON.parse(ev.data);
-    console.log({ ev, messageData });
-    if ("online" in messageData) {
-      showOnlinePeople(messageData.online);
-    } else if ("text" in messageData) {
-      if (messageData.sender === selectedUserId) {
-        setMessages((prev) => [...prev, { ...messageData }]);
-      }
-    }
   }
 
   function logout() {
@@ -58,9 +136,12 @@ export default function Chat() {
     });
   }
 
-  function sendMessage(ev, file = null) {
-    if (ev) ev.preventDefault();
-    ws.send(
+  function sendMessage(
+    e: React.FormEvent<HTMLFormElement> | null,
+    file?: { name: string; data: string }
+  ) {
+    if (e) e.preventDefault();
+    ws?.send(
       JSON.stringify({
         recipient: selectedUserId,
         text: newMessageText,
@@ -73,59 +154,37 @@ export default function Chat() {
       });
     } else {
       setNewMessageText("");
+      console.log("setMessae", messages);
       setMessages((prev) => [
         ...prev,
         {
+          _id: Date.now().toString(),
           text: newMessageText,
           sender: id,
           recipient: selectedUserId,
-          _id: Date.now(),
         },
       ]);
     }
   }
 
-  function sendFile(ev) {
-    const reader = new FileReader();
-    reader.readAsDataURL(ev.target.files[0]);
-    reader.onload = () => {
-      sendMessage(null, {
-        name: ev.target.files[0].name,
-        data: reader.result,
-      });
-    };
+  function sendFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const reader = new FileReader();
+      reader.readAsDataURL(files[0]);
+      reader.onload = () => {
+        sendMessage(null, {
+          name: files[0].name,
+          data: String(reader.result),
+        });
+      };
+    }
   }
 
-  useEffect(() => {
-    const div = divUnderMessages.current;
-    if (div) {
-      div.scrollIntoView({ behavior: "smooth", block: "end" });
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    axios.get("/people").then((res) => {
-      const offlinePeopleArr = res.data
-        .filter((p) => p._id !== id)
-        .filter((p) => !Object.keys(onlinePeople).includes(p._id));
-      const offlinePeople = {};
-      offlinePeopleArr.forEach((p) => {
-        offlinePeople[p._id] = p;
-      });
-      setOfflinePeople(offlinePeople);
-    });
-  }, [onlinePeople]);
-
-  useEffect(() => {
-    if (selectedUserId) {
-      axios.get("/messages/" + selectedUserId).then((res) => {
-        setMessages(res.data);
-      });
-    }
-  }, [selectedUserId]);
-
-  const onlinePeopleExclOurUser = { ...onlinePeople };
-  delete onlinePeopleExclOurUser[id];
+  const onlinePeopleExclOurUser = { ...onlinePeople } as { [key: string]: any };
+  if (id) {
+    delete onlinePeopleExclOurUser[id];
+  }
 
   const messagesWithoutDupes = uniqBy(messages, "_id");
 
@@ -152,7 +211,7 @@ export default function Chat() {
               key={userId}
               id={userId}
               online={false}
-              username={offlinePeople[userId].username}
+              username={offlinePeople[userId]?.username}
               onClick={() => setSelectedUserId(userId)}
               selected={userId === selectedUserId}
             />

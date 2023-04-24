@@ -1,6 +1,20 @@
-import { Avatar } from "./Avatar.tsx";
+import { Avatar } from "./Avatar";
 
-export default function Contact({ id, username, onClick, selected, online }) {
+interface IAvatar {
+  id: string;
+  username: string;
+  onClick: (id: string) => void;
+  selected: boolean;
+  online: boolean;
+}
+
+export default function Contact({
+  id,
+  username,
+  onClick,
+  selected,
+  online,
+}: IAvatar) {
   return (
     <div
       key={id}
