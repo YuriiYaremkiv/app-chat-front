@@ -88,10 +88,15 @@ export default function Chat() {
       const newWs = new WebSocket(process.env.REACT_APP_WEB_SOCKET as string);
       newWs.addEventListener("message", handleMessage);
       newWs.addEventListener("close", handleDisconnect);
+      newWs.addEventListener("error", handleError);
       setWs(newWs);
     } catch (err: unknown) {
       console.error("Error when establishing a WebSocket connection:", err);
     }
+  }
+
+  function handleError(event: Event) {
+    console.error("WebSocket error:", event);
   }
 
   function cleanup() {
